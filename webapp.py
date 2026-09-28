@@ -1,0 +1,140 @@
+"""
+Local/cloud web server for the transformer dashboard.
+
+Run locally:  python webapp.py   -> http://127.0.0.1:5000
+Cloud (Render): gunicorn webapp:app
+
+IMPORTANT DESIGN NOTE
+Readings are generated ON DEMAND (each time the dashboard asks for data,
+if READ_INTERVAL_SECONDS have passed). There is no background thread, so
+nothing can silently die on free hosting. When real hardware is added,
+the ESP32 data will simply be read inside get_reading() in data_source.py.
+"""
+
+import os
+import time
+import threading
+import traceback
+from collections import deque
+
+from flask import Flask, jsonify, request, send_from_directory
+
+import config
+from data_source import get_reading
+from health_engine import compute_health, classify_fault
+from anomaly_model import is_anomaly
+from telegram_alert import send_alert
+from report_generator import generate_pdf_report
+
+app = Flask(__name__)
+BUILD = "v5-on-demand"
+
+state_lock = threading.Lock()
+history = deque(maxlen=20)      # last 20 readings for the chart
+latest = {}                      # most recent full reading
+stats = {"count": 0, "alerts": 0, "anomalies": 0, "peak_temp": 0,
+         "peak_current": 0, "min_health": 100}
+alert_log = deque(maxlen=15)
+diag = {"last_error": None, "error_count": 0, "boot_time": time.time(), "pid": os.getpid()}
+_last_tick = 0.0
+
+
+def do_tick():
+    """Take one reading, analyse it, update shared state."""
+    r = get_reading()
+    temp, curr, volt, oil = r["temperature"], r["current"], r["voltage"], r["oil_level"]
+
+    health = compute_health(temp, curr, volt, oil)
+    level, label, reason = classify_fault(temp, curr, volt, oil, health)
+    anomaly = is_anomaly(temp, curr, volt, oil)
+
+    stats["count"] += 1
+    stats["peak_temp"] = max(stats["peak_temp"], temp)
+    stats["peak_current"] = max(stats["peak_current"], curr)
+    stats["min_health"] = min(stats["min_health"], health)
+    now = time.strftime("%H:%M:%S")
+    if level != "good":
+        stats["alerts"] += 1
+        alert_log.appendleft({"time": now, "level": level,
+                              "text": f"{label} — T:{temp}C I:{curr}A V:{volt}V Oil:{oil}%"})
+    if anomaly:
+        stats["anomalies"] += 1
+        alert_log.appendleft({"time": now, "level": "bad",
+                              "text": "Anomaly pattern detected in sensor data"})
+
+    latest.update({
+        "temperature": temp, "current": curr, "voltage": volt, "oil_level": oil,
+        "health": health, "fault_level": level, "fault_label": label,
+        "fault_reason": reason, "anomaly": anomaly,
+    })
+    history.append({"health": health, "temp": temp, "current": curr, "voltage": volt,
+                    "load": round((volt * curr) / 1000, 2)})
+
+    # Side effects must never break the dashboard.
+    try:
+        if level != "good":
+            send_alert(f"⚠️ {label}\nHealth:{health}% T:{temp}C I:{curr}A V:{volt}V Oil:{oil}%\n{reason}")
+        if anomaly:
+            send_alert(f"🧠 Anomaly detected (Health:{health}%)")
+        if stats["count"] % config.REPORT_EVERY_N_READINGS == 0:
+            generate_pdf_report(stats)
+    except Exception:
+        diag["last_error"] = "side-effect: " + traceback.format_exc()[-400:]
+        diag["error_count"] += 1
+
+
+def maybe_tick():
+    """Generate a new reading if enough time has passed since the last one."""
+    global _last_tick
+    with state_lock:
+        if time.time() - _last_tick < config.READ_INTERVAL_SECONDS - 0.2:
+            return
+        _last_tick = time.time()
+        try:
+            do_tick()
+        except Exception:
+            diag["last_error"] = traceback.format_exc()[-600:]
+            diag["error_count"] += 1
+            print("[tick error]", diag["last_error"], flush=True)
+
+
+@app.route("/")
+def index():
+    return send_from_directory(".", "dashboard_live.html")
+
+
+@app.route("/api/data")
+def api_data():
+    maybe_tick()
+    with state_lock:
+        resp = jsonify({
+            "latest": latest,
+            "history": list(history),
+            "stats": stats,
+            "alerts": list(alert_log),
+            "thresholds": config.THRESHOLDS,
+            "diag": diag,
+            "build": BUILD,
+            "uptime_sec": round(time.time() - diag["boot_time"]),
+        })
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/api/thresholds", methods=["POST"])
+def api_set_thresholds():
+    data = request.get_json(force=True)
+    with state_lock:
+        if "max_temp" in data:
+            config.THRESHOLDS["max_temp"] = float(data["max_temp"])
+        if "max_current" in data:
+            config.THRESHOLDS["max_current"] = float(data["max_current"])
+        if "min_oil" in data:
+            config.THRESHOLDS["min_oil"] = float(data["min_oil"])
+    return jsonify({"ok": True, "thresholds": config.THRESHOLDS})
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
+    print(f"Dashboard running -> open http://127.0.0.1:{port} in your browser", flush=True)
+    app.run(debug=False, host="0.0.0.0", port=port)
