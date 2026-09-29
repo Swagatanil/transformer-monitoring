@@ -26,6 +26,19 @@ def _simulated_reading():
     }
 
 
+def _dataset_reading():
+    """
+    Placeholder for real-dataset replay mode (e.g. ETT transformer dataset).
+    Once the dataset is added, this will read the next row from a CSV
+    (looping back to the start when it runs out) and return it in the
+    same shape as the other modes. Not implemented yet.
+    """
+    raise NotImplementedError(
+        "Dataset replay mode not wired up yet - switch back to Simulator "
+        "or ask to have the dataset connected."
+    )
+
+
 def _firebase_reading():
     """
     Placeholder for real hardware mode.
@@ -46,6 +59,13 @@ def _firebase_reading():
 
 def get_reading():
     """Single entry point the rest of the project calls. Swap-safe."""
-    if config.DATA_SOURCE == "firebase":
-        return _firebase_reading()
+    try:
+        if config.DATA_SOURCE == "firebase":
+            return _firebase_reading()
+        if config.DATA_SOURCE == "dataset":
+            return _dataset_reading()
+    except NotImplementedError:
+        # Mode selected on the website isn't wired up yet - fall back to
+        # the simulator instead of breaking the dashboard.
+        pass
     return _simulated_reading()

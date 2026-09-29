@@ -135,6 +135,22 @@ canvas{width:100%; height:150px; display:block;}
   </div>
 
   <div class="panel">
+    <h3>Data Source</h3>
+    <div class="settings-row" style="border:none;">
+      <span style="color:var(--muted); font-size:.8rem;">Currently using: <b id="ds-current" style="color:var(--accent);">--</b></span>
+    </div>
+    <div class="settings-row" style="border:none; gap:8px;">
+      <select id="ds-select" style="flex:1; background:#0d1117; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px; font-size:.82rem;">
+        <option value="simulator">Simulator (Demo, random data)</option>
+        <option value="dataset">Dataset Replay (ETT transformer data)</option>
+        <option value="firebase">Live Hardware (ESP32 via Firebase)</option>
+      </select>
+      <button class="btn" id="ds-save" style="margin:0;">Switch</button>
+    </div>
+    <div class="reason" id="ds-note" style="margin-top:6px;"></div>
+  </div>
+
+  <div class="panel">
     <h3>Alert Threshold Settings</h3>
     <div class="settings-row">Max Temp (°C) <input type="number" id="th-temp" value="65"></div>
     <div class="settings-row">Max Current (A) <input type="number" id="th-curr" value="16"></div>
@@ -254,6 +270,12 @@ function poll(){
     document.getElementById('fc-peak').textContent = hours[Math.floor(Math.random()*hours.length)];
 
     lastStats = d.stats;
+    if(d.data_source){
+      document.getElementById('ds-current').textContent =
+        d.data_source==='simulator' ? 'Simulator (Demo)' :
+        d.data_source==='dataset' ? 'Dataset Replay' : 'Live Hardware';
+      document.getElementById('ds-select').value = d.data_source;
+    }
     drawChart(d.history);
     renderLog(d.alerts);
   }).catch(function(){
@@ -261,6 +283,25 @@ function poll(){
     document.getElementById('conn').style.color = 'var(--bad)';
   });
 }
+
+document.getElementById('ds-save').addEventListener('click', function(){
+  var mode = document.getElementById('ds-select').value;
+  fetch('/api/datasource', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({mode: mode})})
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      var note = document.getElementById('ds-note');
+      if(res.ok){
+        note.style.color = 'var(--good)';
+        note.textContent = 'Switched. If this mode is not wired up yet, it will automatically fall back to Simulator.';
+      } else {
+        note.style.color = 'var(--bad)';
+        note.textContent = 'Could not switch: ' + (res.error || 'unknown error');
+      }
+    })
+    .catch(function(){
+      document.getElementById('ds-note').textContent = 'Request failed.';
+    });
+});
 
 var lastStats = {};
 document.getElementById('gen-report').addEventListener('click', function(){

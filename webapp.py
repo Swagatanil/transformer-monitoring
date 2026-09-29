@@ -116,6 +116,7 @@ def api_data():
             "diag": diag,
             "build": BUILD,
             "uptime_sec": round(time.time() - diag["boot_time"]),
+            "data_source": config.DATA_SOURCE,
         })
     resp.headers["Cache-Control"] = "no-store"
     return resp
@@ -132,6 +133,16 @@ def api_set_thresholds():
         if "min_oil" in data:
             config.THRESHOLDS["min_oil"] = float(data["min_oil"])
     return jsonify({"ok": True, "thresholds": config.THRESHOLDS})
+
+
+@app.route("/api/datasource", methods=["POST"])
+def api_set_datasource():
+    data = request.get_json(force=True)
+    mode = data.get("mode", "")
+    if mode not in ("simulator", "dataset", "firebase"):
+        return jsonify({"ok": False, "error": "invalid mode"}), 400
+    config.DATA_SOURCE = mode
+    return jsonify({"ok": True, "data_source": config.DATA_SOURCE})
 
 
 if __name__ == "__main__":
