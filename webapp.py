@@ -27,7 +27,7 @@ from telegram_alert import send_alert
 from report_generator import generate_pdf_report
 
 app = Flask(__name__)
-BUILD = "v5-on-demand"
+BUILD = "v6-persist-mode"
 
 _MODE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "current_mode.txt")
 
