@@ -120,8 +120,9 @@ def get_reading():
             return _firebase_reading()
         if config.DATA_SOURCE == "dataset":
             return _dataset_reading()
-    except NotImplementedError:
-        # Mode selected on the website isn't wired up yet - fall back to
-        # the simulator instead of breaking the dashboard.
-        pass
+    except Exception as e:
+        # Mode selected on the website failed (missing file, bad format,
+        # network issue, etc) - fall back to the simulator instead of
+        # crashing the whole background reading loop.
+        print(f"[get_reading fallback] {config.DATA_SOURCE} failed: {e}", flush=True)
     return _simulated_reading()

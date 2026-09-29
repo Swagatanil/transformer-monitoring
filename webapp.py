@@ -29,6 +29,22 @@ from report_generator import generate_pdf_report
 app = Flask(__name__)
 BUILD = "v5-on-demand"
 
+_MODE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "current_mode.txt")
+
+
+def _load_saved_mode():
+    try:
+        with open(_MODE_FILE) as f:
+            mode = f.read().strip()
+            if mode in ("simulator", "dataset", "firebase"):
+                return mode
+    except FileNotFoundError:
+        pass
+    return config.DATA_SOURCE
+
+
+config.DATA_SOURCE = _load_saved_mode()
+
 state_lock = threading.Lock()
 history = deque(maxlen=20)      # last 20 readings for the chart
 latest = {}                      # most recent full reading
@@ -142,6 +158,11 @@ def api_set_datasource():
     if mode not in ("simulator", "dataset", "firebase"):
         return jsonify({"ok": False, "error": "invalid mode"}), 400
     config.DATA_SOURCE = mode
+    try:
+        with open(_MODE_FILE, "w") as f:
+            f.write(mode)
+    except Exception:
+        pass
     return jsonify({"ok": True, "data_source": config.DATA_SOURCE})
 
 
