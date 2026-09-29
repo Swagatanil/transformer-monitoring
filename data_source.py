@@ -26,17 +26,73 @@ def _simulated_reading():
     }
 
 
+import os
+import csv
+
+_ETT_ROWS = None
+_ETT_INDEX = 0
+_ETT_PATH = os.path.join(os.path.dirname(__file__), "data", "ETTh1.csv")
+
+# Scaling: the raw ETT columns are normalized/de-meaned values from the
+# original research paper (they can go negative), not physical units.
+# We linearly remap them into realistic transformer ranges so the
+# dashboard shows sensible numbers while still being driven by real
+# recorded temperature/load *patterns* (highs stay high, lows stay low).
+_OT_MIN, _OT_MAX = -4.08, 46.01          # observed range of the OT column
+_TEMP_LO, _TEMP_HI = 32, 78               # target temperature range (°C)
+
+_LOAD_MIN, _LOAD_MAX = -45.66, 46.77      # observed range of HUFL+MUFL+LUFL
+_CURR_LO, _CURR_HI = 4, 22                # target current range (A)
+
+
+def _load_ett_rows():
+    global _ETT_ROWS
+    if _ETT_ROWS is None:
+        with open(_ETT_PATH, newline="") as f:
+            _ETT_ROWS = list(csv.DictReader(f))
+    return _ETT_ROWS
+
+
+def _rescale(value, src_lo, src_hi, dst_lo, dst_hi):
+    ratio = (value - src_lo) / (src_hi - src_lo)
+    ratio = max(0.0, min(1.0, ratio))
+    return dst_lo + ratio * (dst_hi - dst_lo)
+
+
 def _dataset_reading():
     """
-    Placeholder for real-dataset replay mode (e.g. ETT transformer dataset).
-    Once the dataset is added, this will read the next row from a CSV
-    (looping back to the start when it runs out) and return it in the
-    same shape as the other modes. Not implemented yet.
+    Replays the real ETT (Electricity Transformer Temperature) dataset,
+    one row per call, looping back to the start when it runs out.
+
+    Source: ETTh1.csv (hourly), zhouhaoyi/ETDataset (GitHub).
+    OT column -> temperature. HUFL+MUFL+LUFL -> load -> current
+    (Current = Load*1000 / Voltage, single-phase approximation).
+    Both are linearly rescaled from the dataset's own value range into
+    realistic transformer ranges - see constants above.
     """
-    raise NotImplementedError(
-        "Dataset replay mode not wired up yet - switch back to Simulator "
-        "or ask to have the dataset connected."
-    )
+    global _ETT_INDEX
+    rows = _load_ett_rows()
+    row = rows[_ETT_INDEX % len(rows)]
+    _ETT_INDEX += 1
+
+    ot = float(row["OT"])
+    raw_load = float(row["HUFL"]) + float(row["MUFL"]) + float(row["LUFL"])
+
+    temp = round(_rescale(ot, _OT_MIN, _OT_MAX, _TEMP_LO, _TEMP_HI), 1)
+    # Small realistic voltage wobble so the "Voltage Fluctuation" fault
+    # can still trigger occasionally, instead of a perfectly fixed value.
+    voltage = round(random.uniform(215, 245), 1)
+    current = round(_rescale(raw_load, _LOAD_MIN, _LOAD_MAX, _CURR_LO, _CURR_HI), 1)
+    # Oil level has no equivalent column in this dataset - keep it simulated.
+    oil = round(random.uniform(30, 90), 1)
+
+    return {
+        "timestamp": time.time(),
+        "temperature": temp,
+        "current": current,
+        "voltage": voltage,
+        "oil_level": oil,
+    }
 
 
 def _firebase_reading():
