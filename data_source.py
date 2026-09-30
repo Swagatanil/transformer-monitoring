@@ -13,6 +13,7 @@ the project needs to be touched.
 import random
 import time
 import config
+from health_engine import compute_health
 
 
 def _simulated_reading():
@@ -93,6 +94,42 @@ def _dataset_reading():
         "voltage": voltage,
         "oil_level": oil,
     }
+
+
+def get_dataset_window(hours):
+    """
+    Returns a chart-ready slice of the REAL dataset spanning `hours` of
+    its own recorded history (ETTh1 is hourly, so 1 day = 24 rows,
+    1 week = 168 rows, etc). Independent of the live replay pointer and
+    of how long the dashboard has been open - this reads straight from
+    the dataset's own dates, so long ranges (day/week/month) work
+    immediately instead of waiting for that much real time to pass.
+    Returns [] if the dataset file isn't available.
+    """
+    try:
+        rows = _load_ett_rows()
+    except Exception:
+        return []
+    n = max(2, min(int(hours), len(rows)))
+    slice_rows = rows[:n]
+    out = []
+    for row in slice_rows:
+        ot = float(row["OT"])
+        raw_load = float(row["HUFL"]) + float(row["MUFL"]) + float(row["LUFL"])
+        temp = round(_rescale(ot, _OT_MIN, _OT_MAX, _TEMP_LO, _TEMP_HI), 1)
+        current = round(_rescale(raw_load, _LOAD_MIN, _LOAD_MAX, _CURR_LO, _CURR_HI), 1)
+        voltage = 230.0
+        oil = 60.0  # placeholder - not present in this dataset
+        health = compute_health(temp, current, voltage, oil)
+        out.append({
+            "time": row["date"],
+            "health": health,
+            "temp": temp,
+            "current": current,
+            "voltage": voltage,
+            "load": round(current * voltage / 1000, 2),
+        })
+    return out
 
 
 def _firebase_reading():

@@ -38,6 +38,12 @@ canvas{width:100%; height:150px; display:block;}
 .legend span{display:flex; align-items:center; gap:5px;}
 .time-axis{display:flex; justify-content:space-between; font-size:.68rem; color:var(--muted); margin-top:4px;}
 .leg-item{transition:opacity .15s;}
+.leg-label{color:var(--muted);}
+.leg-val{color:var(--text);}
+.range-row{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;}
+.range-btn{background:var(--card); border:1px solid var(--border); color:var(--muted); padding:5px 10px;
+  border-radius:16px; font-size:.72rem; cursor:pointer;}
+.range-btn.active{background:var(--accent); color:#fff; border-color:var(--accent);}
 .sw{width:10px; height:10px; border-radius:2px; display:inline-block;}
 .log{max-height:170px; overflow-y:auto; font-size:.8rem;}
 .log-item{padding:6px 0; border-bottom:1px solid var(--border); display:flex; gap:8px;}
@@ -126,18 +132,28 @@ canvas{width:100%; height:150px; display:block;}
 
   <div class="panel">
     <h3>Multi-Parameter Trend</h3>
+    <div class="range-row" id="range-row">
+      <button class="range-btn" data-sec="300">5 Min</button>
+      <button class="range-btn" data-sec="900">15 Min</button>
+      <button class="range-btn" data-sec="1800">30 Min</button>
+      <button class="range-btn active" data-sec="3600">1 Hr</button>
+      <button class="range-btn" data-sec="18000">5 Hr</button>
+      <button class="range-btn" data-sec="86400">1 Day</button>
+      <button class="range-btn" data-sec="604800">1 Week</button>
+      <button class="range-btn" data-sec="2592000">Month</button>
+    </div>
     <canvas id="chart" width="600" height="150"></canvas>
     <div class="time-axis" id="time-axis">
       <span id="t-start">--</span><span id="t-end">--</span>
     </div>
     <div class="legend" id="legend">
-      <span class="leg-item" data-key="health"><i class="sw" style="background:#58a6ff"></i>Health %</span>
-      <span class="leg-item" data-key="temp"><i class="sw" style="background:#f85149"></i>Temp °C</span>
-      <span class="leg-item" data-key="current"><i class="sw" style="background:#d29922"></i>Current A</span>
-      <span class="leg-item" data-key="voltage"><i class="sw" style="background:#a371f7"></i>Voltage V</span>
-      <span class="leg-item" data-key="load"><i class="sw" style="background:#3fb950"></i>Load kW</span>
+      <span class="leg-item" data-key="health"><i class="sw" style="background:#58a6ff"></i><span class="leg-label">Health</span> <b class="leg-val" id="lv-health">--%</b></span>
+      <span class="leg-item" data-key="temp"><i class="sw" style="background:#f85149"></i><span class="leg-label">Temp</span> <b class="leg-val" id="lv-temp">--°C</b></span>
+      <span class="leg-item" data-key="current"><i class="sw" style="background:#d29922"></i><span class="leg-label">Current</span> <b class="leg-val" id="lv-current">--A</b></span>
+      <span class="leg-item" data-key="voltage"><i class="sw" style="background:#a371f7"></i><span class="leg-label">Voltage</span> <b class="leg-val" id="lv-voltage">--V</b></span>
+      <span class="leg-item" data-key="load"><i class="sw" style="background:#3fb950"></i><span class="leg-label">Load</span> <b class="leg-val" id="lv-load">--kW</b></span>
     </div>
-    <div style="color:var(--muted); font-size:.68rem; margin-top:4px;">Tap a legend item to show/hide that line</div>
+    <div style="color:var(--muted); font-size:.68rem; margin-top:4px;" id="chart-note">Tap a legend item to show/hide that line</div>
   </div>
 
   <div class="panel">
@@ -189,6 +205,33 @@ function resizeCanvas(){
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
 
+var selectedRangeSec = 3600;
+var currentDataSource = 'simulator';
+document.querySelectorAll('.range-btn').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    document.querySelectorAll('.range-btn').forEach(function(b){ b.classList.remove('active'); });
+    btn.classList.add('active');
+    selectedRangeSec = parseInt(btn.getAttribute('data-sec'), 10);
+    if(currentDataSource === 'dataset' && selectedRangeSec >= 3600){
+      var hours = Math.round(selectedRangeSec/3600);
+      document.getElementById('chart-note').textContent = 'ETT dataset se ' + hours + ' hour ka real historical data la rahe hain...';
+      fetch('/api/dataset_window?hours=' + hours)
+        .then(function(r){ return r.json(); })
+        .then(function(res){
+          if(res.ok && res.points.length){
+            window._datasetWindow = res.points;
+            drawChart(res.points, true);
+          } else {
+            document.getElementById('chart-note').textContent = 'Dataset window load nahi hui.';
+          }
+        });
+    } else {
+      window._datasetWindow = null;
+      if(window._lastHist) drawChart(window._lastHist);
+    }
+  });
+});
+
 var seriesVisible = {health:true, temp:true, current:true, voltage:true, load:true};
 document.querySelectorAll('.leg-item').forEach(function(el){
   el.style.cursor = 'pointer';
@@ -201,19 +244,42 @@ document.querySelectorAll('.leg-item').forEach(function(el){
   });
 });
 
-function drawChart(hist){
-  window._lastHist = hist;
+function drawChart(hist, isHistorical){
+  window._lastHist = isHistorical ? window._lastHist : hist;
+  var filtered;
+  if(isHistorical){
+    filtered = hist;
+  } else {
+    var now = Date.now()/1000;
+    filtered = hist.filter(function(pt){ return pt.ts && (now - pt.ts) <= selectedRangeSec; });
+    if(filtered.length === 0) filtered = hist;
+
+    var note = document.getElementById('chart-note');
+    var span = hist.length>0 ? (now - hist[0].ts) : 0;
+    if(selectedRangeSec > 3600 && span < selectedRangeSec * 0.9 && currentDataSource !== 'dataset'){
+      var have = span < 60 ? Math.round(span)+'s' : span < 3600 ? Math.round(span/60)+'min' : Math.round(span/3600)+'hr';
+      note.textContent = 'Sirf ' + have + ' ka data abhi tak collect hua hai — jitna hai utna dikha rahe hain.';
+    } else if(selectedRangeSec <= 3600 || currentDataSource !== 'dataset') {
+      note.textContent = 'Tap a legend item to show/hide that line';
+    }
+  }
+
+  if(isHistorical){
+    document.getElementById('chart-note').textContent =
+      'Real ETT dataset se ' + filtered.length + ' hours ka historical data (' + filtered[0].time + ' se ' + filtered[filtered.length-1].time + ')';
+  }
+
   resizeCanvas();
   var w = canvas.clientWidth, h = canvas.clientHeight;
   ctx.clearRect(0,0,w,h);
   ctx.strokeStyle = '#2a2f3a'; ctx.lineWidth = 1;
   for(var i=0;i<=4;i++){ var y=h-(i/4)*h; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
   function line(key,color,minv,maxv){
-    if(hist.length<2 || !seriesVisible[key]) return;
+    if(filtered.length<2 || !seriesVisible[key]) return;
     ctx.strokeStyle=color; ctx.lineWidth=2; ctx.beginPath();
-    hist.forEach(function(pt,i){
+    filtered.forEach(function(pt,i){
       var v=pt[key], norm=Math.max(0,Math.min(1,(v-minv)/(maxv-minv)));
-      var x=(i/(hist.length-1))*w, y=h-norm*h;
+      var x=(i/(filtered.length-1))*w, y=h-norm*h;
       if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
     });
     ctx.stroke();
@@ -224,9 +290,15 @@ function drawChart(hist){
   line('voltage','#a371f7',190,260);
   line('load','#3fb950',0,15);
 
-  if(hist.length>0){
-    document.getElementById('t-start').textContent = hist[0].time || '--';
-    document.getElementById('t-end').textContent = hist[hist.length-1].time || '--';
+  if(filtered.length>0){
+    document.getElementById('t-start').textContent = filtered[0].time || '--';
+    document.getElementById('t-end').textContent = filtered[filtered.length-1].time || '--';
+    var last = filtered[filtered.length-1];
+    document.getElementById('lv-health').textContent = last.health+'%';
+    document.getElementById('lv-temp').textContent = last.temp+'°C';
+    document.getElementById('lv-current').textContent = last.current+'A';
+    document.getElementById('lv-voltage').textContent = last.voltage+'V';
+    document.getElementById('lv-load').textContent = last.load+'kW';
   }
 }
 
@@ -295,12 +367,15 @@ function poll(){
 
     lastStats = d.stats;
     if(d.data_source){
+      currentDataSource = d.data_source;
       document.getElementById('ds-current').textContent =
         d.data_source==='simulator' ? 'Simulator (Demo)' :
         d.data_source==='dataset' ? 'Dataset Replay' : 'Live Hardware';
       document.getElementById('ds-select').value = d.data_source;
     }
-    drawChart(d.history);
+    if(!(window._datasetWindow && selectedRangeSec >= 3600 && currentDataSource === 'dataset')){
+      drawChart(d.history);
+    }
     renderLog(d.alerts);
   }).catch(function(){
     document.getElementById('conn').textContent = 'Disconnected';

@@ -20,7 +20,7 @@ from collections import deque
 from flask import Flask, jsonify, request, send_from_directory
 
 import config
-from data_source import get_reading
+from data_source import get_reading, get_dataset_window
 from health_engine import compute_health, classify_fault
 from anomaly_model import is_anomaly
 from telegram_alert import send_alert
@@ -46,7 +46,7 @@ def _load_saved_mode():
 config.DATA_SOURCE = _load_saved_mode()
 
 state_lock = threading.Lock()
-history = deque(maxlen=20)      # last 20 readings for the chart
+history = deque(maxlen=1200)    # up to ~1 hour at 3s/tick, for the time-range selector
 latest = {}                      # most recent full reading
 stats = {"count": 0, "alerts": 0, "anomalies": 0, "peak_temp": 0,
          "peak_current": 0, "min_health": 100}
@@ -84,7 +84,8 @@ def do_tick():
         "fault_reason": reason, "anomaly": anomaly,
     })
     history.append({"health": health, "temp": temp, "current": curr, "voltage": volt,
-                    "load": round((volt * curr) / 1000, 2), "time": time.strftime("%H:%M:%S")})
+                    "load": round((volt * curr) / 1000, 2), "time": time.strftime("%H:%M:%S"),
+                    "ts": time.time()})
 
     # Side effects must never break the dashboard.
     try:
@@ -149,6 +150,17 @@ def api_set_thresholds():
         if "min_oil" in data:
             config.THRESHOLDS["min_oil"] = float(data["min_oil"])
     return jsonify({"ok": True, "thresholds": config.THRESHOLDS})
+
+
+@app.route("/api/dataset_window")
+def api_dataset_window():
+    hours = request.args.get("hours", "24")
+    try:
+        hours = int(hours)
+    except ValueError:
+        hours = 24
+    points = get_dataset_window(hours)
+    return jsonify({"ok": bool(points), "points": points, "source": "ETTh1.csv (real dataset)"})
 
 
 @app.route("/api/datasource", methods=["POST"])
