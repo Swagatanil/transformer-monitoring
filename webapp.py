@@ -84,7 +84,7 @@ def do_tick():
         "fault_reason": reason, "anomaly": anomaly,
     })
     history.append({"health": health, "temp": temp, "current": curr, "voltage": volt,
-                    "load": round((volt * curr) / 1000, 2)})
+                    "load": round((volt * curr) / 1000, 2), "time": time.strftime("%H:%M:%S")})
 
     # Side effects must never break the dashboard.
     try:

@@ -36,6 +36,8 @@ header p{margin:4px 0 0; color:var(--muted); font-size:.78rem;}
 canvas{width:100%; height:150px; display:block;}
 .legend{display:flex; gap:12px; flex-wrap:wrap; font-size:.72rem; color:var(--muted); margin-top:8px;}
 .legend span{display:flex; align-items:center; gap:5px;}
+.time-axis{display:flex; justify-content:space-between; font-size:.68rem; color:var(--muted); margin-top:4px;}
+.leg-item{transition:opacity .15s;}
 .sw{width:10px; height:10px; border-radius:2px; display:inline-block;}
 .log{max-height:170px; overflow-y:auto; font-size:.8rem;}
 .log-item{padding:6px 0; border-bottom:1px solid var(--border); display:flex; gap:8px;}
@@ -125,13 +127,17 @@ canvas{width:100%; height:150px; display:block;}
   <div class="panel">
     <h3>Multi-Parameter Trend</h3>
     <canvas id="chart" width="600" height="150"></canvas>
-    <div class="legend">
-      <span><i class="sw" style="background:#58a6ff"></i>Health %</span>
-      <span><i class="sw" style="background:#f85149"></i>Temp °C</span>
-      <span><i class="sw" style="background:#d29922"></i>Current A</span>
-      <span><i class="sw" style="background:#a371f7"></i>Voltage V</span>
-      <span><i class="sw" style="background:#3fb950"></i>Load kW</span>
+    <div class="time-axis" id="time-axis">
+      <span id="t-start">--</span><span id="t-end">--</span>
     </div>
+    <div class="legend" id="legend">
+      <span class="leg-item" data-key="health"><i class="sw" style="background:#58a6ff"></i>Health %</span>
+      <span class="leg-item" data-key="temp"><i class="sw" style="background:#f85149"></i>Temp °C</span>
+      <span class="leg-item" data-key="current"><i class="sw" style="background:#d29922"></i>Current A</span>
+      <span class="leg-item" data-key="voltage"><i class="sw" style="background:#a371f7"></i>Voltage V</span>
+      <span class="leg-item" data-key="load"><i class="sw" style="background:#3fb950"></i>Load kW</span>
+    </div>
+    <div style="color:var(--muted); font-size:.68rem; margin-top:4px;">Tap a legend item to show/hide that line</div>
   </div>
 
   <div class="panel">
@@ -183,14 +189,27 @@ function resizeCanvas(){
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
 
+var seriesVisible = {health:true, temp:true, current:true, voltage:true, load:true};
+document.querySelectorAll('.leg-item').forEach(function(el){
+  el.style.cursor = 'pointer';
+  el.addEventListener('click', function(){
+    var key = el.getAttribute('data-key');
+    seriesVisible[key] = !seriesVisible[key];
+    el.style.opacity = seriesVisible[key] ? '1' : '0.35';
+    el.style.textDecoration = seriesVisible[key] ? 'none' : 'line-through';
+    if(window._lastHist) drawChart(window._lastHist);
+  });
+});
+
 function drawChart(hist){
+  window._lastHist = hist;
   resizeCanvas();
   var w = canvas.clientWidth, h = canvas.clientHeight;
   ctx.clearRect(0,0,w,h);
   ctx.strokeStyle = '#2a2f3a'; ctx.lineWidth = 1;
   for(var i=0;i<=4;i++){ var y=h-(i/4)*h; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
   function line(key,color,minv,maxv){
-    if(hist.length<2) return;
+    if(hist.length<2 || !seriesVisible[key]) return;
     ctx.strokeStyle=color; ctx.lineWidth=2; ctx.beginPath();
     hist.forEach(function(pt,i){
       var v=pt[key], norm=Math.max(0,Math.min(1,(v-minv)/(maxv-minv)));
@@ -204,6 +223,11 @@ function drawChart(hist){
   line('current','#d29922',0,30);
   line('voltage','#a371f7',190,260);
   line('load','#3fb950',0,15);
+
+  if(hist.length>0){
+    document.getElementById('t-start').textContent = hist[0].time || '--';
+    document.getElementById('t-end').textContent = hist[hist.length-1].time || '--';
+  }
 }
 
 var colorMap = {good:'var(--good)', warn:'var(--warn)', bad:'var(--bad)'};
