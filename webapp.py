@@ -58,21 +58,34 @@ _last_tick = 0.0
 def do_tick():
     """Take one reading, analyse it, update shared state."""
     r = get_reading()
-    temp, curr, volt, oil = r["temperature"], r["current"], r["voltage"], r["oil_level"]
+    temp, curr = r["temperature"], r["current"]
+    volt, oil = r.get("voltage"), r.get("oil_level")
+    load_kw = r.get("load_kw")
+    if load_kw is None and volt is not None:
+        load_kw = round((volt * curr) / 1000, 2)
+    source_label = r.get("source_label", config.DATA_SOURCE)
 
     health = compute_health(temp, curr, volt, oil)
     level, label, reason = classify_fault(temp, curr, volt, oil, health)
-    anomaly = is_anomaly(temp, curr, volt, oil)
+    # Anomaly detection needs all 4 features - skip it honestly when some
+    # readings (e.g. voltage/oil) aren't available from this data source,
+    # rather than guessing values to feed the model.
+    if volt is not None and oil is not None:
+        anomaly = is_anomaly(temp, curr, volt, oil)
+    else:
+        anomaly = False
 
     stats["count"] += 1
     stats["peak_temp"] = max(stats["peak_temp"], temp)
     stats["peak_current"] = max(stats["peak_current"], curr)
     stats["min_health"] = min(stats["min_health"], health)
     now = time.strftime("%H:%M:%S")
+    volt_txt = f"{volt}V" if volt is not None else "N/A"
+    oil_txt = f"{oil}%" if oil is not None else "N/A"
     if level != "good":
         stats["alerts"] += 1
         alert_log.appendleft({"time": now, "level": level,
-                              "text": f"{label} — T:{temp}C I:{curr}A V:{volt}V Oil:{oil}%"})
+                              "text": f"{label} — T:{temp}C I:{curr}A V:{volt_txt} Oil:{oil_txt}"})
     if anomaly:
         stats["anomalies"] += 1
         alert_log.appendleft({"time": now, "level": "bad",
@@ -80,17 +93,18 @@ def do_tick():
 
     latest.update({
         "temperature": temp, "current": curr, "voltage": volt, "oil_level": oil,
+        "load_kw": load_kw, "source_label": source_label,
         "health": health, "fault_level": level, "fault_label": label,
         "fault_reason": reason, "anomaly": anomaly,
     })
     history.append({"health": health, "temp": temp, "current": curr, "voltage": volt,
-                    "load": round((volt * curr) / 1000, 2), "time": time.strftime("%H:%M:%S"),
+                    "load": load_kw, "time": time.strftime("%H:%M:%S"),
                     "ts": time.time()})
 
     # Side effects must never break the dashboard.
     try:
         if level != "good":
-            send_alert(f"⚠️ {label}\nHealth:{health}% T:{temp}C I:{curr}A V:{volt}V Oil:{oil}%\n{reason}")
+            send_alert(f"⚠️ {label}\nHealth:{health}% T:{temp}C I:{curr}A V:{volt_txt} Oil:{oil_txt}\n{reason}")
         if anomaly:
             send_alert(f"🧠 Anomaly detected (Health:{health}%)")
         if stats["count"] % config.REPORT_EVERY_N_READINGS == 0:

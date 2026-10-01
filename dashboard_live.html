@@ -74,6 +74,7 @@ canvas{width:100%; height:150px; display:block;}
 <header>
   <h1>⚡ Transformer Monitoring Dashboard</h1>
   <p>Live data from local Python backend (webapp.py)</p>
+  <p id="source-label" style="color:var(--accent); font-size:.78rem; margin-top:4px;"></p>
 </header>
 
 <div class="wrap">
@@ -276,11 +277,16 @@ function drawChart(hist, isHistorical){
   for(var i=0;i<=4;i++){ var y=h-(i/4)*h; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
   function line(key,color,minv,maxv){
     if(filtered.length<2 || !seriesVisible[key]) return;
+    var hasData = filtered.some(function(pt){ return pt[key]!==null && pt[key]!==undefined; });
+    if(!hasData) return;
     ctx.strokeStyle=color; ctx.lineWidth=2; ctx.beginPath();
+    var started = false;
     filtered.forEach(function(pt,i){
-      var v=pt[key], norm=Math.max(0,Math.min(1,(v-minv)/(maxv-minv)));
+      var v=pt[key];
+      if(v===null || v===undefined) return;
+      var norm=Math.max(0,Math.min(1,(v-minv)/(maxv-minv)));
       var x=(i/(filtered.length-1))*w, y=h-norm*h;
-      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+      if(!started){ ctx.moveTo(x,y); started=true; } else { ctx.lineTo(x,y); }
     });
     ctx.stroke();
   }
@@ -297,8 +303,8 @@ function drawChart(hist, isHistorical){
     document.getElementById('lv-health').textContent = last.health+'%';
     document.getElementById('lv-temp').textContent = last.temp+'°C';
     document.getElementById('lv-current').textContent = last.current+'A';
-    document.getElementById('lv-voltage').textContent = last.voltage+'V';
-    document.getElementById('lv-load').textContent = last.load+'kW';
+    document.getElementById('lv-voltage').textContent = (last.voltage===null||last.voltage===undefined) ? 'N/A' : last.voltage+'V';
+    document.getElementById('lv-load').textContent = (last.load===null||last.load===undefined) ? 'N/A' : last.load+'kW';
   }
 }
 
@@ -335,9 +341,11 @@ function poll(){
 
     document.getElementById('v-temp').innerHTML = l.temperature+'<span class="unit">°C</span>';
     document.getElementById('v-curr').innerHTML = l.current+'<span class="unit">A</span>';
-    document.getElementById('v-volt').innerHTML = l.voltage+'<span class="unit">V</span>';
-    document.getElementById('v-oil').innerHTML = l.oil_level+'<span class="unit">%</span>';
-    document.getElementById('v-load').innerHTML = ((l.voltage*l.current)/1000).toFixed(2)+'<span class="unit">kW</span>';
+    document.getElementById('v-volt').innerHTML = (l.voltage===null||l.voltage===undefined) ? 'N/A' : l.voltage+'<span class="unit">V</span>';
+    document.getElementById('v-oil').innerHTML = (l.oil_level===null||l.oil_level===undefined) ? 'N/A' : l.oil_level+'<span class="unit">%</span>';
+    document.getElementById('v-load').innerHTML = (l.load_kw===null||l.load_kw===undefined) ? 'N/A' : l.load_kw+'<span class="unit">kW</span>';
+    var srcEl = document.getElementById('source-label');
+    if(srcEl) srcEl.textContent = l.source_label || '';
 
     document.getElementById('anomaly-badge').textContent = l.anomaly ? 'ANOMALY DETECTED' : 'NORMAL PATTERN';
     document.getElementById('anomaly-badge').style.background = l.anomaly ? 'var(--bad)' : 'var(--good)';

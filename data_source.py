@@ -17,13 +17,18 @@ from health_engine import compute_health
 
 
 def _simulated_reading():
-    """Generates one fake sensor reading, same ranges as the demo dashboard."""
+    """Generates one fake sensor reading, same ranges as the demo dashboard.
+    Every field here is synthetic - no real data involved in this mode."""
+    voltage = round(random.uniform(210, 245), 1)
+    current = round(random.uniform(5, 20), 1)
     return {
         "timestamp": time.time(),
         "temperature": round(random.uniform(35, 75), 1),
-        "current": round(random.uniform(5, 20), 1),
-        "voltage": round(random.uniform(210, 245), 1),
+        "current": current,
+        "voltage": voltage,
         "oil_level": round(random.uniform(25, 90), 1),
+        "load_kw": round(voltage * current / 1000, 2),
+        "source_label": "Simulator (all fields synthetic)",
     }
 
 
@@ -66,10 +71,12 @@ def _dataset_reading():
     one row per call, looping back to the start when it runs out.
 
     Source: ETTh1.csv (hourly), zhouhaoyi/ETDataset (GitHub).
-    OT column -> temperature. HUFL+MUFL+LUFL -> load -> current
-    (Current = Load*1000 / Voltage, single-phase approximation).
-    Both are linearly rescaled from the dataset's own value range into
-    realistic transformer ranges - see constants above.
+    - temperature: REAL (OT column, rescaled into a realistic °C range)
+    - current / load_kw: REAL-DERIVED (from HUFL+MUFL+LUFL, rescaled -
+      both computed directly from the dataset, not from each other,
+      so nothing here depends on a made-up voltage)
+    - voltage / oil_level: NOT present in this dataset - returned as
+      None so the dashboard shows "N/A" instead of a fabricated number.
     """
     global _ETT_INDEX
     rows = _load_ett_rows()
@@ -80,19 +87,17 @@ def _dataset_reading():
     raw_load = float(row["HUFL"]) + float(row["MUFL"]) + float(row["LUFL"])
 
     temp = round(_rescale(ot, _OT_MIN, _OT_MAX, _TEMP_LO, _TEMP_HI), 1)
-    # Small realistic voltage wobble so the "Voltage Fluctuation" fault
-    # can still trigger occasionally, instead of a perfectly fixed value.
-    voltage = round(random.uniform(215, 245), 1)
     current = round(_rescale(raw_load, _LOAD_MIN, _LOAD_MAX, _CURR_LO, _CURR_HI), 1)
-    # Oil level has no equivalent column in this dataset - keep it simulated.
-    oil = round(random.uniform(30, 90), 1)
+    load_kw = round(_rescale(raw_load, _LOAD_MIN, _LOAD_MAX, 1.0, 9.0), 2)
 
     return {
         "timestamp": time.time(),
         "temperature": temp,
         "current": current,
-        "voltage": voltage,
-        "oil_level": oil,
+        "voltage": None,
+        "oil_level": None,
+        "load_kw": load_kw,
+        "source_label": "ETT dataset (temp & current real; voltage/oil N/A)",
     }
 
 
@@ -118,16 +123,15 @@ def get_dataset_window(hours):
         raw_load = float(row["HUFL"]) + float(row["MUFL"]) + float(row["LUFL"])
         temp = round(_rescale(ot, _OT_MIN, _OT_MAX, _TEMP_LO, _TEMP_HI), 1)
         current = round(_rescale(raw_load, _LOAD_MIN, _LOAD_MAX, _CURR_LO, _CURR_HI), 1)
-        voltage = 230.0
-        oil = 60.0  # placeholder - not present in this dataset
-        health = compute_health(temp, current, voltage, oil)
+        load_kw = round(_rescale(raw_load, _LOAD_MIN, _LOAD_MAX, 1.0, 9.0), 2)
+        health = compute_health(temp, current, None, None)
         out.append({
             "time": row["date"],
             "health": health,
             "temp": temp,
             "current": current,
-            "voltage": voltage,
-            "load": round(current * voltage / 1000, 2),
+            "voltage": None,
+            "load": load_kw,
         })
     return out
 
